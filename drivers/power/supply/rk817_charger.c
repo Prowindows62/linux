@@ -121,7 +121,7 @@ struct rk817_charger {
 #define ADC_TO_CHARGE_UAH(adc_value, res_div)	\
 	(adc_value / 3600 * 172 / res_div)
 
-static u8 rk817_chg_cur_to_reg(u32 chg_cur_ma)
+static int rk817_chg_cur_to_reg(u32 chg_cur_ma)
 {
 	if (chg_cur_ma >= 3500)
 		return CHG_3_5A;
@@ -785,8 +785,6 @@ rk817_read_or_set_full_charge_on_boot(struct rk817_charger *charger,
 		regmap_bulk_read(rk808->regmap, RK817_GAS_GAUGE_Q_PRES_H3,
 				 bulk_reg, 4);
 		tmp = get_unaligned_be32(bulk_reg);
-		if (tmp < 0)
-			tmp = 0;
 		boot_charge_mah = ADC_TO_CHARGE_UAH(tmp,
 						    charger->res_div) / 1000;
 		/*
@@ -825,8 +823,6 @@ rk817_read_or_set_full_charge_on_boot(struct rk817_charger *charger,
 	regmap_bulk_read(rk808->regmap, RK817_GAS_GAUGE_Q_PRES_H3,
 			 bulk_reg, 4);
 	tmp = get_unaligned_be32(bulk_reg);
-	if (tmp < 0)
-		tmp = 0;
 	boot_charge_mah = ADC_TO_CHARGE_UAH(tmp, charger->res_div) / 1000;
 	regmap_bulk_read(rk808->regmap, RK817_GAS_GAUGE_OCV_VOL_H,
 			 bulk_reg, 2);
@@ -864,8 +860,8 @@ static int rk817_battery_init(struct rk817_charger *charger,
 {
 	struct rk808 *rk808 = charger->rk808;
 	u32 tmp, max_chg_vol_mv, max_chg_cur_ma;
-	u8 max_chg_vol_reg, chg_term_i_reg, max_chg_cur_reg;
-	int ret, chg_term_ma;
+	u8 max_chg_vol_reg, chg_term_i_reg;
+	int ret, chg_term_ma, max_chg_cur_reg;
 	u8 bulk_reg[2];
 
 	/* Get initial plug state */
@@ -1060,8 +1056,10 @@ static int rk817_charger_probe(struct platform_device *pdev)
 		return -ENODEV;
 
 	charger = devm_kzalloc(&pdev->dev, sizeof(*charger), GFP_KERNEL);
-	if (!charger)
+	if (!charger) {
+		of_node_put(node);
 		return -ENOMEM;
+	}
 
 	charger->rk808 = rk808;
 
@@ -1116,14 +1114,12 @@ static int rk817_charger_probe(struct platform_device *pdev)
 
 	charger->bat_ps = devm_power_supply_register(&pdev->dev,
 						     &rk817_bat_desc, &pscfg);
-
-	charger->chg_ps = devm_power_supply_register(&pdev->dev,
-						     &rk817_chg_desc, &pscfg);
-
-	if (IS_ERR(charger->chg_ps))
+	if (IS_ERR(charger->bat_ps))
 		return dev_err_probe(dev, -EINVAL,
 				     "Battery failed to probe\n");
 
+	charger->chg_ps = devm_power_supply_register(&pdev->dev,
+						     &rk817_chg_desc, &pscfg);
 	if (IS_ERR(charger->chg_ps))
 		return dev_err_probe(dev, -EINVAL,
 				     "Charger failed to probe\n");

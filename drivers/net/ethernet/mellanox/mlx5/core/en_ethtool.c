@@ -35,7 +35,6 @@
 #include "en.h"
 #include "en/port.h"
 #include "en/params.h"
-#include "en/xsk/pool.h"
 #include "en/ptp.h"
 #include "lib/clock.h"
 #include "en/fs_ethtool.h"
@@ -412,15 +411,8 @@ void mlx5e_ethtool_get_channels(struct mlx5e_priv *priv,
 				struct ethtool_channels *ch)
 {
 	mutex_lock(&priv->state_lock);
-
 	ch->max_combined   = priv->max_nch;
 	ch->combined_count = priv->channels.params.num_channels;
-	if (priv->xsk.refcnt) {
-		/* The upper half are XSK queues. */
-		ch->max_combined *= 2;
-		ch->combined_count *= 2;
-	}
-
 	mutex_unlock(&priv->state_lock);
 }
 
@@ -453,16 +445,6 @@ int mlx5e_ethtool_set_channels(struct mlx5e_priv *priv,
 		return 0;
 
 	mutex_lock(&priv->state_lock);
-
-	/* Don't allow changing the number of channels if there is an active
-	 * XSK, because the numeration of the XSK and regular RQs will change.
-	 */
-	if (priv->xsk.refcnt) {
-		err = -EINVAL;
-		netdev_err(priv->netdev, "%s: AF_XDP is active, cannot change the number of channels\n",
-			   __func__);
-		goto out;
-	}
 
 	/* Don't allow changing the number of channels if HTB offload is active,
 	 * because the numeration of the QoS SQs will change, while per-queue
@@ -2003,6 +1985,7 @@ static int set_pflag_rx_striding_rq(struct net_device *netdev, bool enable)
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 	struct mlx5_core_dev *mdev = priv->mdev;
 	struct mlx5e_params new_params;
+	int err;
 
 	if (enable) {
 		/* Checking the regular RQ here; mlx5e_validate_xsk_param called
@@ -2023,7 +2006,14 @@ static int set_pflag_rx_striding_rq(struct net_device *netdev, bool enable)
 	MLX5E_SET_PFLAG(&new_params, MLX5E_PFLAG_RX_STRIDING_RQ, enable);
 	mlx5e_set_rq_type(mdev, &new_params);
 
-	return mlx5e_safe_switch_params(priv, &new_params, NULL, NULL, true);
+	err = mlx5e_safe_switch_params(priv, &new_params, NULL, NULL, true);
+	if (err)
+		return err;
+
+	/* update XDP supported features */
+	mlx5e_set_xdp_feature(netdev);
+
+	return 0;
 }
 
 static int set_pflag_rx_no_csum_complete(struct net_device *netdev, bool enable)
@@ -2463,4 +2453,5 @@ const struct ethtool_ops mlx5e_ethtool_ops = {
 	.get_eth_mac_stats = mlx5e_get_eth_mac_stats,
 	.get_eth_ctrl_stats = mlx5e_get_eth_ctrl_stats,
 	.get_rmon_stats    = mlx5e_get_rmon_stats,
+	.get_link_ext_stats = mlx5e_get_link_ext_stats
 };

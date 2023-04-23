@@ -249,7 +249,7 @@ static enum ipc_pcie_sleep_state ipc_pcie_read_bios_cfg(struct device *dev)
 	if (object->integer.value == 3)
 		sleep_state = IPC_PCIE_D3L2;
 
-	kfree(object);
+	ACPI_FREE(object);
 
 default_ret:
 	return sleep_state;
@@ -295,7 +295,7 @@ static int ipc_pcie_probe(struct pci_dev *pci,
 	ret = dma_set_mask(ipc_pcie->dev, DMA_BIT_MASK(64));
 	if (ret) {
 		dev_err(ipc_pcie->dev, "Could not set PCI DMA mask: %d", ret);
-		return ret;
+		goto set_mask_fail;
 	}
 
 	ipc_pcie_config_aspm(ipc_pcie);
@@ -323,6 +323,7 @@ static int ipc_pcie_probe(struct pci_dev *pci,
 imem_init_fail:
 	ipc_pcie_resources_release(ipc_pcie);
 resources_req_fail:
+set_mask_fail:
 	pci_disable_device(pci);
 pci_enable_fail:
 	kfree(ipc_pcie);
